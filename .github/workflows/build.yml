@@ -1,0 +1,21 @@
+name: Build fingerprint-chromium for macOS (Intel x86_64)
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target CPU'
+        type: choice
+        default: x86_64
+        options: [x86_64, arm64]
+      os:
+        description: 'Runner label (Apple Silicon runner cross-compiles x86_64)'
+        type: string
+        default: macos-15
+
+jobs:
+  build:
+    name: Build fingerprint-chromium macOS ${{ inputs.arch }}
+    uses: ./.github/workflows/building.yml
+    with:
+      arch: ${{ inputs.arch }}
+      os: ${{ inputs.os }}
