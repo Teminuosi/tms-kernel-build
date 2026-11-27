@@ -1,0 +1,51 @@
+name: Probe build speed vs parallelism (experiment, no upload)
+
+# 2026-11-27: main run 45767092731 slowed to ~50-400 steps/hour in blink/renderer/core on the free
+# macos-15 arm runner (3 cores / 7 GB). Hypothesis: ninja default -j5 makes heavy blink TUs swap.
+# This restores the latest part-build artifact of that run, builds ~70 min with a given -j,
+# and logs memory/swap every minute. Nothing is uploaded except a small log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: run id to take the part build from
+        required: true
+        default: '45767092731'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        jobs: [5, 3, 2]
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp -va ./.github/scripts/ ./
+      - run: ./github_prepare_xcode.sh
+      - run: sudo mdutil -a -i off
+      - name: Download build from source run
+        uses: actions/download-artifact@v4
+        with:
+          name: github_build_artifact_x86_64
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+      - run: ./github_setup_env_toolchain.sh x86_64
+      - run: ./github_unpack_archive.sh
+      - name: Build with -j ${{ matrix.jobs }} for 70 min and log memory
+        run: |
+          set +e
+          sysctl hw.ncpu hw.memsize
+          ( while true; do echo "MEM $(date -u +%H:%M:%S) $(sysctl -n vm.swapusage) | $(memory_pressure -Q 2>/dev/null | tail -1) | pageouts $(vm_stat | awk '/Pageouts/{print $2}')"; sleep 60; done ) &
+          cd build/src
+          timeout -s SIGTERM 4200 ninja -j ${{ matrix.jobs }} -C out/Default chrome chromedriver > ../../ninja.log 2>&1
+          echo "ninja exit $?"
+          grep -aE '^\[[0-9]+/' ../../ninja.log | sed -n '1p;$p'
+          echo "steps done in 70 min:"
+          awk '/^\[[0-9]+\//{n++} END{print n}' ../../ninja.log
